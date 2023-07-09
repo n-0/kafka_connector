@@ -1,7 +1,4 @@
-use std::{error};
-
-use log::{debug, error};
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use log::error;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
@@ -12,7 +9,7 @@ pub fn add(left: usize, right: usize) -> usize {
 mod tests {
     use std::{fs::File, io::Read, time::Duration};
 
-    use crate::{KafkaConnectorError, common::{connect_cluster, get_connectors_topics}, connectors::{get_connectors, post_connector, PostConnectorsRequest, GetConnectorsStatus, get_connectors_status, delete_connector, pause_connector, resume_connector}};
+    use crate::{KafkaConnectorError, KafkaConnector, connectors::PostConnectorsRequest};
 
     use super::*;
 
@@ -50,8 +47,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_cluster() {
+        let kcon = KafkaConnector::new_host("http://localhost:8083".to_string());
         logging();
-        let res = connect_cluster().await;
+        let res = kcon.connect_cluster().await;
         print_error(&res);
         assert!(res.is_ok());
         let res = res.unwrap();
@@ -63,7 +61,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_connectors() {
         logging();
-        let res = get_connectors().await;
+        let kcon = KafkaConnector::new_host("http://localhost:8083".to_string());
+        let res = kcon.get_connectors().await;
         print_error(&res);
         assert!(res.is_ok());
         log::debug!("{:#?}", res);
@@ -72,6 +71,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_delete_connector() {
         logging();
+        let kcon = KafkaConnector::new_host("http://localhost:8083".to_string());
 
         let raw_config_path = format!("{}/static/mongo_sink.json", std::env!("CARGO_MANIFEST_DIR"));
         let config_path = std::path::Path::new(&raw_config_path).to_string_lossy();
@@ -82,7 +82,7 @@ mod tests {
             name: "mongo-sink-tester".to_string(),
             config,
         };
-        let res = post_connector(payload.clone()).await;
+        let res = kcon.post_connector(payload.clone()).await;
 
         tokio::time::sleep(Duration::new(3, 0)).await;
 
@@ -91,20 +91,20 @@ mod tests {
         let res = res.unwrap();
         assert!(res.name == payload.name);
         
-        let status = get_connectors_status(res.name.clone()).await;
+        let status = kcon.get_connectors_status(res.name.clone()).await;
         assert!(status.is_ok());
         let status = status.unwrap();
         let state = status.connector.get("state").unwrap();
         assert!(state == "RUNNING");
 
         tokio::time::sleep(Duration::new(1, 0)).await;
-        let topics = get_connectors_topics(payload.name).await;
+        let topics = kcon.get_connectors_topics(payload.name).await;
         print_error(&topics);
         // TODO a full test would need to write a message to the topic
         // to create it
         assert!(topics.is_ok());
 
-        let deleted = delete_connector(res.name).await;
+        let deleted = kcon.delete_connector(res.name).await;
         
         assert!(deleted.is_ok());
     }
@@ -113,6 +113,7 @@ mod tests {
     #[tokio::test]
     async fn test_resume_connector() {
         logging();
+        let kcon = KafkaConnector::new_host("http://localhost:8083".to_string());
 
         let raw_config_path = format!("{}/static/mongo_sink_put.json", std::env!("CARGO_MANIFEST_DIR"));
         let config_path = std::path::Path::new(&raw_config_path).to_string_lossy();
@@ -124,7 +125,7 @@ mod tests {
             name: name.to_string(),
             config,
         };
-        let res = post_connector(payload.clone()).await;
+        let res = kcon.post_connector(payload.clone()).await;
 
         tokio::time::sleep(Duration::new(3, 0)).await;
 
@@ -133,31 +134,30 @@ mod tests {
         let res = res.unwrap();
 
         assert!(res.name == payload.name);
-        let status = get_connectors_status(name.clone()).await;
+        let status = kcon.get_connectors_status(name.clone()).await;
         assert!(status.is_ok());
         let status = status.unwrap();
         let state = status.connector.get("state").unwrap();
         assert!(state == "RUNNING");
 
-        let pause = pause_connector(name.clone()).await;
+        let pause = kcon.pause_connector(name.clone()).await;
         assert!(pause.is_ok());
-        let status = get_connectors_status(name.clone()).await;
-        let status = status.unwrap();
         tokio::time::sleep(Duration::new(2, 0)).await;
+        let status = kcon.get_connectors_status(name.clone()).await;
+        let status = status.unwrap();
         let state = status.connector.get("state").unwrap();
         assert!(state == "PAUSED");
-        let resume = resume_connector(name.clone()).await;
+        let resume = kcon.resume_connector(name.clone()).await;
         assert!(resume.is_ok());
+        tokio::time::sleep(Duration::new(10, 0)).await;
 
-        let status = get_connectors_status(name.clone()).await;
+        let status = kcon.get_connectors_status(name.clone()).await;
         let status = status.unwrap();
         let state = status.connector.get("state").unwrap();
         assert!(state == "RUNNING");
 
-        tokio::time::sleep(Duration::new(10, 0)).await;
-        let deleted = delete_connector(res.name).await;
+        let deleted = kcon.delete_connector(res.name).await;
         assert!(deleted.is_ok());
     }
 }
-
 
